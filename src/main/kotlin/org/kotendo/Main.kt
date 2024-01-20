@@ -1,4 +1,4 @@
-package org.example
+package org.kotendo
 
 fun main() {
     println("Hello World!")
