@@ -1,5 +1,7 @@
 plugins {
+    id("org.openjfx.javafxplugin") version "0.0.13"
     kotlin("jvm") version "1.9.21"
+
 }
 
 group = "org.example"
@@ -18,4 +20,9 @@ tasks.test {
 }
 kotlin {
     jvmToolchain(21)
+}
+
+javafx {
+    version = "21"
+    modules("javafx.controls", "javafx.fxml")
 }
