@@ -77,7 +77,7 @@ class Ppu(
                }
            }
            registerAddrOfSpriteRamData -> spriteRam.read()
-           registerAddrOfPpuData -> ram.read(register.ppuAddrIncrBytesb)
+           registerAddrOfPpuData -> ram.read(register.ppuAddrIncrBytes)
            else -> throw IllegalArgumentException("Read operation is invalid at addr:$addr")
        }
        return result
@@ -98,6 +98,21 @@ class Ppu(
 
     fun transferToSprite(bytes: ByteArray) {
         spriteRam.transfer(bytes)
+    }
+
+    private fun addrOfNameTable(nametableId: Int) = addrOfNameTable.plus(0x400 * nametableId)
+
+    private fun addrOfAttrTable(nametableId: Int) = addrOfAttrTable.plus(0x400 * nametableId)
+
+    private fun nametableId(absolute: Pixel): Int {
+        // Take care of nametable mirroring (See `What is that "Mirroring" flag?` on http://fms.komkon.org/iNES/iNES.html#LABL)
+        val horizontalAndVerticalPositions = if (nametableMirroringVertical) {
+            Pair((absolute.x.value / Pixel.maxX) % 2, 0)
+        }
+        else {
+            Pair(0, (absolute.y.value / Pixel.maxY) % 2)
+        }
+        return horizontalAndVerticalPositions.first + horizontalAndVerticalPositions.second * 2
     }
 
     private fun buildBgLine() {
@@ -138,4 +153,81 @@ class Ppu(
         }
     }
 
+    private fun buildSprites() {
+        for (i in 0.until(0x100) step 4) {
+            val sprite = Sprite.get(
+                register = register,
+                image = image,
+                spriteRam = spriteRam,
+                index = i
+            ) ?: continue
+            for (indexOfY in 0.until(sprite.heightOfSprite)) {
+                renderer.add(
+                    layer = if (sprite.prioritizedBg) {
+                        Renderer.Layer.REMOTE_SPRITE
+                    } else {
+                        Renderer.Layer.CLOSE_SPRITE
+                    },
+                    addrOfPatternTable = sprite.addrOfPatternTable,
+                    addrOfPaletteTable = addrOfSpritePaletteTable,
+                    spriteId = sprite.id + indexOfY,
+                    paletteId = sprite.paletteId,
+                    position = Pixel(
+                        sprite.position.x,
+                        sprite.position.y.plus(Pixel.Unit(indexOfY * Tile.pixelsInTile))
+                    ),
+                    reverseHorizontal = sprite.reverseHorizontal,
+                    reverseVertical = sprite.reverseVertical
+                )
+            }
+        }
+    }
+    private fun updateSpriteHit() {
+        val sprite = Sprite.get(
+            register = register,
+            image = image,
+            spriteRam = spriteRam,
+            index = 0
+        ) ?: return
+        if (tileY.contains(sprite.position.y) && register.bgEnabled && register.spriteEnabled) {
+            register.spriteHit = true
+        }
+    }
+
+    fun run(cycle: Int): Boolean {
+        this.cycle += cycle
+        if (this.cycle < cyclesPerLine) {
+            return false
+        }
+        this.cycle -= cyclesPerLine
+        line = line.incr(1)
+
+        if (line.LineTiming()) {
+            if (register.bgEnabled) {
+                buildBgLine()
+                updateSpriteHit()
+            }
+
+            register.vblank = true
+            if (register.interruptOnVBlank) {
+                interrupt.nmi = true
+            }
+        }
+        else if (line.readyForNewLIne()) {
+            if (register.spriteEnabled) {
+                buildSprites()
+            }
+            renderer.render()
+            register.vblank = false
+            register.spriteHit = false
+            line = Line(0)
+            tileY = Tile.Unit(0)
+            return true
+        }
+        return false
+    }
+
+    override fun toString(): String {
+        return "Ppu(interrupt=$interrupt, cycle=$cycle, line=$line, register=$register"
+    }
 }
